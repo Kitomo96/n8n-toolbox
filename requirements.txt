@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+crawl4ai
+pillow
+pytesseract
+pyexiftool
+httpx
+opencv-python-headless
