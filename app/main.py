@@ -1,5 +1,5 @@
 # =================================================================================
-# FINAL AND COMPLETE main.py - Version 3.2.0
+# FINAL AND COMPLETE main.py - Version 3.2.0 (Updated)
 # This is the full code, including all endpoints and security features.
 # =================================================================================
 import os
@@ -244,58 +244,9 @@ async def convert_media(
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": "FFmpeg conversion failed.", "details": e.stderr}})
 
-# --- Crawl4AI (patched to modern API + normalized markdown) ---
-@app.post("/crawl", tags=["Crawl4AI"], response_model=SuccessResponse)
-async def run_crawl(
-    api_key: str = Depends(verify_api_key),
-    url: str = Form(...)
-):
-    if not url:
-        raise HTTPException(status_code=400, detail={"ok": False, "error": {"message": "URL parameter is required."}})
-    try:
-        if _Crawler is None:
-            raise RuntimeError("crawl4ai.AsyncWebCrawler is not available in this package version")
-
-        run_cfg = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            markdown_generator=DefaultMarkdownGenerator()
-        )
-
-        async with _Crawler() as crawler:
-            res = await crawler.arun(url=url, config=run_cfg)
-
-        # --- 0.7.x-compliant extraction (no fallbacks) ---
-        md_out = ""
-        md_obj = getattr(res, "markdown", None)
-
-        # If markdown came as a plain string, use it
-        if isinstance(md_obj, str) and md_obj.strip():
-            md_out = md_obj
-        else:
-            # In 0.7.x, markdown is an object (StringCompatibleMarkdown / model)
-            if md_obj is not None:
-                for key in ("fit_markdown", "raw_markdown", "markdown_with_citations", "references_markdown"):
-                    val = getattr(md_obj, key, None)
-                    if isinstance(val, str) and val.strip():
-                        md_out = val
-                        break
-
-        logging.info(
-            f"/crawl extracted: type={type(md_obj).__name__} "
-            f"raw={len(getattr(md_obj,'raw_markdown','') or '')} "
-            f"fit={len(getattr(md_obj,'fit_markdown','') or '')} "
-            f"cit={len(getattr(md_obj,'markdown_with_citations','') or '')} "
-            f"refs={len(getattr(md_obj,'references_markdown','') or '')}"
-        )
-
-        return {"ok": True, "data": {"markdown_content": md_out or "", "source_url": url}}
-
-    except Exception as e:
-        logging.error(f"An error occurred during crawling for {url}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": f"An error occurred during crawling: {str(e)}"}})
-
-@app.post("/crawl_probe", tags=["Crawl4AI"])
-async def crawl_probe(
+# --- Crawl4AI Scraper Endpoint ---
+@app.post("/scrape", tags=["Crawl4AI"])
+async def scrape_url(
     api_key: str = Depends(verify_api_key),
     url: str = Form(...)
 ):
