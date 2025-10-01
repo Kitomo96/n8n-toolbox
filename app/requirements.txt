@@ -1,6 +1,6 @@
 crawl4ai
 opencv-python-headless
-exiftool
+PyExifTool
 fastapi
 httpx
 pillow
