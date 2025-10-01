@@ -39,7 +39,7 @@ class ErrorResponse(BaseModel):
     ok: bool = False
     error: dict
 
-# --- NEW: Structured Logging Middleware ---
+# --- Structured Logging Middleware ---
 @app.middleware("http")
 async def structured_logging_middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())
@@ -55,7 +55,7 @@ async def structured_logging_middleware(request: Request, call_next):
     )
     return response
 
-# --- UPGRADED: Robust File Handling Helper ---
+# --- Robust File Handling Helper ---
 async def get_temp_file_from_request(background_tasks: BackgroundTasks, file: Optional[UploadFile] = None, url: Optional[str] = None) -> str:
     if not file and not url:
         raise HTTPException(status_code=400, detail={"ok": False, "error": {"message": "Please provide either a file or a URL."}})
@@ -63,7 +63,6 @@ async def get_temp_file_from_request(background_tasks: BackgroundTasks, file: Op
     temp_path = f"/tmp/{uuid.uuid4()}"
     
     if file:
-        # Streamed upload with size limit
         size = 0
         try:
             with open(temp_path, "wb") as f:
@@ -73,11 +72,9 @@ async def get_temp_file_from_request(background_tasks: BackgroundTasks, file: Op
                         raise HTTPException(status_code=413, detail={"ok": False, "error": {"message": f"File size exceeds limit of {MAX_FILE_SIZE_MB} MB."}})
                     f.write(chunk)
         except Exception as e:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            if os.path.exists(temp_path): os.remove(temp_path)
             raise e
     elif url:
-        # URL download with extension derivation
         try:
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", url, follow_redirects=True, timeout=30.0) as response:
@@ -85,8 +82,7 @@ async def get_temp_file_from_request(background_tasks: BackgroundTasks, file: Op
                     
                     content_type = response.headers.get("content-type")
                     extension = mimetypes.guess_extension(content_type) if content_type else os.path.splitext(url)[1]
-                    if extension:
-                        temp_path += extension
+                    if extension: temp_path += extension
 
                     size = 0
                     with open(temp_path, "wb") as f:
@@ -101,7 +97,7 @@ async def get_temp_file_from_request(background_tasks: BackgroundTasks, file: Op
     background_tasks.add_task(os.remove, temp_path)
     return temp_path
 
-# --- Ergonomic & Health Endpoints (Unchanged) ---
+# --- Ergonomic & Health Endpoints ---
 @app.get("/health", tags=["General"], response_model=SuccessResponse)
 async def health_check():
     return {"ok": True, "data": {"status": "healthy"}}
@@ -110,7 +106,7 @@ async def health_check():
 async def get_version():
     return {"ok": True, "data": {"version": APP_VERSION}}
 
-# --- Tool Endpoints (Refactored to use new helper and add validation) ---
+# --- Tool Endpoints ---
 
 @app.post("/ocr", tags=["Tesseract"], response_model=SuccessResponse)
 async def run_ocr(
@@ -121,8 +117,7 @@ async def run_ocr(
     temp_path = await get_temp_file_from_request(background_tasks, file, url)
     try:
         img_cv = cv2.imdecode(np.fromfile(temp_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if img_cv is None:
-            raise ValueError("File is not a valid image or is corrupted.")
+        if img_cv is None: raise ValueError("File is not a valid image or is corrupted.")
         gray_img = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
         _, threshold_img = cv2.threshold(gray_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
@@ -131,31 +126,6 @@ async def run_ocr(
         return {"ok": True, "data": {"text": text, "lang": lang}}
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": str(e)}})
-
-@app.post("/image/crop", tags=["Pillow"])
-async def crop_image(
-    background_tasks: BackgroundTasks,
-    x: int = Form(...), y: int = Form(...), w: int = Form(...), h: int = Form(...),
-    file: Optional[UploadFile] = None, url: Optional[str] = Form(None)
-):
-    # UPGRADED: Input validation
-    if w <= 0 or h <= 0 or w > 10000 or h > 10000:
-        raise HTTPException(status_code=422, detail={"ok": False, "error": {"message": "Invalid dimensions. Width and height must be positive and less than 10,000 pixels."}})
-    
-    input_path = await get_temp_file_from_request(background_tasks, file, url)
-    output_path = f"{os.path.splitext(input_path)[0]}_cropped.png"
-    background_tasks.add_task(os.remove, output_path)
-
-    try:
-        with Image.open(input_path) as img:
-            if x + w > img.width or y + h > img.height:
-                 raise ValueError("Crop box is outside the image bounds.")
-            cropped_img = img.crop((x, y, x + w, y + h))
-            cropped_img.save(output_path, "PNG")
-        
-        return FileResponse(path=output_path, media_type="image/png", filename="cropped.png")
-    except Exception as e:
-        raise HTTPException(status_code=422 if isinstance(e, ValueError) else 500, detail={"ok": False, "error": {"message": str(e)}})
 
 @app.post("/ffmpeg/convert", tags=["FFmpeg"])
 async def convert_media(
@@ -169,18 +139,11 @@ async def convert_media(
     background_tasks.add_task(os.remove, output_path)
     
     try:
-        # UPGRADED: Fast-seek by putting -ss before -i
-        command = ["ffmpeg", "-y"] # -y overwrites output files
-        if start is not None:
-            command.extend(["-ss", str(start)])
-        
+        command = ["ffmpeg", "-y"]
+        if start is not None: command.extend(["-ss", str(start)])
         command.extend(["-i", input_path])
-
-        if duration is not None:
-            command.extend(["-t", str(duration)])
-        
-        if target_format == "mp3":
-            command.extend(["-q:a", "0"])
+        if duration is not None: command.extend(["-t", str(duration)])
+        if target_format == "mp3": command.extend(["-q:a", "0"])
         
         command.append(output_path)
         
@@ -191,4 +154,4 @@ async def convert_media(
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": "FFmpeg conversion failed.", "details": e.stderr}})
 
-# (Other endpoints like /exif, /image/convert, /crawl can be included and follow the same robust pattern)
+# (Add other endpoints like /exif, /image/crop, /crawl following the same pattern)

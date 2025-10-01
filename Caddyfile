@@ -1,0 +1,6 @@
+# In n8n-toolbox/Caddyfile
+
+# Caddy will get the domain name from the CADDY_DOMAIN variable in the .env file
+{env.CADDY_DOMAIN} {
+    reverse_proxy toolbox:8000
+}
