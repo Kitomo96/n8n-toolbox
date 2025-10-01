@@ -1,6 +1,5 @@
 # =================================================================================
-# FINAL AND COMPLETE main.py - Version 3.2.0
-# This is the full code, including all endpoints and security features.
+# FINAL AND COMPLETE main.py - Version 3.2.1 (patched crawl import for compatibility)
 # =================================================================================
 import os
 import uuid
@@ -25,7 +24,15 @@ import numpy as np
 from PIL import Image
 import pytesseract
 from exiftool import ExifToolHelper
-from crawl4ai import crawl
+
+# --- Crawl4AI import (patched) ---
+# Your original code did: from crawl4ai import crawl
+# That symbol isn't available in newer crawl4ai releases.
+# We switch to the modern async crawler if present.
+try:
+    from crawl4ai import AsyncWebCrawler as _Crawler  # newer API
+except Exception:
+    _Crawler = None
 
 # --- Helper for local development with .env file ---
 from dotenv import load_dotenv
@@ -234,6 +241,7 @@ async def convert_media(
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": "FFmpeg conversion failed.", "details": e.stderr}})
 
+# --- Crawl4AI (patched) ---
 @app.post("/crawl", tags=["Crawl4AI"], response_model=SuccessResponse)
 async def run_crawl(
     api_key: str = Depends(verify_api_key),
@@ -242,8 +250,16 @@ async def run_crawl(
     if not url:
         raise HTTPException(status_code=400, detail={"ok": False, "error": {"message": "URL parameter is required."}})
     try:
-        output = await crawl(url)
-        result = "".join([item for item in output])
-        return {"ok": True, "data": {"markdown_content": result, "source_url": url}}
+        if _Crawler is None:
+            raise RuntimeError("crawl4ai.AsyncWebCrawler is not available in this package version")
+        # Use modern async crawler API
+        async with _Crawler() as crawler:
+            res = await crawler.arun(url=url)
+            # Normalize common fields across versions
+            md = getattr(res, "markdown", None) \
+                 or getattr(res, "markdown_v2", None) \
+                 or getattr(res, "text", None) \
+                 or str(res)
+            return {"ok": True, "data": {"markdown_content": md, "source_url": url}}
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": f"An error occurred during crawling: {str(e)}"}})
