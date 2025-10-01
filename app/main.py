@@ -1,5 +1,6 @@
 # =================================================================================
-# FINAL AND COMPLETE main.py - Version 3.2.1 (patched crawl import for compatibility)
+# FINAL AND COMPLETE main.py - Version 3.2.0
+# This is the full code, including all endpoints and security features.
 # =================================================================================
 import os
 import uuid
@@ -25,14 +26,16 @@ from PIL import Image
 import pytesseract
 from exiftool import ExifToolHelper
 
-# --- Crawl4AI import (patched) ---
-# Your original code did: from crawl4ai import crawl
-# That symbol isn't available in newer crawl4ai releases.
-# We switch to the modern async crawler if present.
+# NOTE: original had: from crawl4ai import crawl
+# Patch: use modern crawl4ai API with markdown generator (avoids nulls)
 try:
-    from crawl4ai import AsyncWebCrawler as _Crawler  # newer API
+    from crawl4ai import AsyncWebCrawler as _Crawler, CrawlerRunConfig, CacheMode
+    from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 except Exception:
     _Crawler = None
+    CrawlerRunConfig = None
+    CacheMode = None
+    DefaultMarkdownGenerator = None
 
 # --- Helper for local development with .env file ---
 from dotenv import load_dotenv
@@ -241,7 +244,7 @@ async def convert_media(
     except subprocess.CalledProcessError as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": "FFmpeg conversion failed.", "details": e.stderr}})
 
-# --- Crawl4AI (patched) ---
+# --- Crawl4AI (patched to modern API + normalized markdown) ---
 @app.post("/crawl", tags=["Crawl4AI"], response_model=SuccessResponse)
 async def run_crawl(
     api_key: str = Depends(verify_api_key),
@@ -252,14 +255,30 @@ async def run_crawl(
     try:
         if _Crawler is None:
             raise RuntimeError("crawl4ai.AsyncWebCrawler is not available in this package version")
-        # Use modern async crawler API
+
+        # If available, use a run config that forces markdown generation
+        run_cfg = None
+        if CrawlerRunConfig and DefaultMarkdownGenerator and CacheMode:
+            run_cfg = CrawlerRunConfig(
+                cache_mode=CacheMode.BYPASS,
+                markdown_generator=DefaultMarkdownGenerator()
+            )
+
         async with _Crawler() as crawler:
-            res = await crawler.arun(url=url)
-            # Normalize common fields across versions
-            md = getattr(res, "markdown", None) \
-                 or getattr(res, "markdown_v2", None) \
-                 or getattr(res, "text", None) \
-                 or str(res)
-            return {"ok": True, "data": {"markdown_content": md, "source_url": url}}
+            res = await crawler.arun(url=url, config=run_cfg) if run_cfg else await crawler.arun(url=url)
+
+        # Normalize to a plain string (avoid nulls)
+        md = None
+        mark = getattr(res, "markdown", None)
+        if isinstance(mark, str):
+            md = mark
+        elif mark is not None:
+            md = getattr(mark, "fit_markdown", None) or getattr(mark, "raw_markdown", None) \
+                 or getattr(mark, "markdown_with_citations", None)
+
+        if not md:
+            md = getattr(res, "cleaned_html", None) or getattr(res, "html", None) or getattr(res, "text", None) or ""
+
+        return {"ok": True, "data": {"markdown_content": md, "source_url": url}}
     except Exception as e:
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": f"An error occurred during crawling: {str(e)}"}})
