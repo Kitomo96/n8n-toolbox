@@ -277,13 +277,16 @@ async def run_crawl(
                 md = content
                 break  # Stop as soon as we find valid content
 
-        # If markdown was an object, try to extract from its properties (for older versions)
+        # If markdown was an object, try to extract from its properties (works for 0.7.x too)
         if not md:
             mark_obj = getattr(res, 'markdown', None)
-            if hasattr(mark_obj, '__dict__'): # Check if it's an object with attributes
-                 md = getattr(mark_obj, "fit_markdown", None) or \
-                      getattr(mark_obj, "raw_markdown", None) or \
-                      getattr(mark_obj, "markdown_with_citations", None)
+            if mark_obj is not None:
+                md = (
+                    getattr(mark_obj, "fit_markdown", None)
+                    or getattr(mark_obj, "raw_markdown", None)
+                    or getattr(mark_obj, "markdown_with_citations", None)
+                )
+
 
         # Final fallback to an empty string if nothing was found
         final_markdown = md or ""
