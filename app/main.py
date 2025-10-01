@@ -256,7 +256,6 @@ async def run_crawl(
         if _Crawler is None:
             raise RuntimeError("crawl4ai.AsyncWebCrawler is not available in this package version")
 
-        # If available, use a run config that forces markdown generation
         run_cfg = None
         if CrawlerRunConfig and DefaultMarkdownGenerator and CacheMode:
             run_cfg = CrawlerRunConfig(
@@ -267,18 +266,29 @@ async def run_crawl(
         async with _Crawler() as crawler:
             res = await crawler.arun(url=url, config=run_cfg) if run_cfg else await crawler.arun(url=url)
 
-        # Normalize to a plain string (avoid nulls)
+        # --- NEW, MORE ROBUST EXTRACTION LOGIC ---
         md = None
-        mark = getattr(res, "markdown", None)
-        if isinstance(mark, str):
-            md = mark
-        elif mark is not None:
-            md = getattr(mark, "fit_markdown", None) or getattr(mark, "raw_markdown", None) \
-                 or getattr(mark, "markdown_with_citations", None)
+        
+        # Sequentially check for the most likely attributes that contain the content
+        possible_attributes = ['markdown', 'text', 'content', 'cleaned_html']
+        for attr in possible_attributes:
+            content = getattr(res, attr, None)
+            if content and isinstance(content, str) and content.strip():
+                md = content
+                break  # Stop as soon as we find valid content
 
+        # If markdown was an object, try to extract from its properties (for older versions)
         if not md:
-            md = getattr(res, "cleaned_html", None) or getattr(res, "html", None) or getattr(res, "text", None) or ""
+            mark_obj = getattr(res, 'markdown', None)
+            if hasattr(mark_obj, '__dict__'): # Check if it's an object with attributes
+                 md = getattr(mark_obj, "fit_markdown", None) or \
+                      getattr(mark_obj, "raw_markdown", None) or \
+                      getattr(mark_obj, "markdown_with_citations", None)
 
-        return {"ok": True, "data": {"markdown_content": md, "source_url": url}}
+        # Final fallback to an empty string if nothing was found
+        final_markdown = md or ""
+
+        return {"ok": True, "data": {"markdown_content": final_markdown, "source_url": url}}
     except Exception as e:
+        logging.error(f"An error occurred during crawling for {url}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": f"An error occurred during crawling: {str(e)}"}})
