@@ -23,19 +23,22 @@ RUN apt-get update && \
     && apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Set the TESSDATA_PREFIX environment variable so Tesseract can find the language packs
+# Set the TESSDATA_PREFIX environment 
+# variable so Tesseract can find the language packs
 ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata
 
 # Copy and install Python requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install the system dependencies required by Playwright's browsers
+RUN playwright install-deps
+
 # Install the browser binaries required by Playwright (for crawl4ai)
 RUN playwright install chromium
 
 # Copy the application code into the container
 COPY main.py .
-
 # Expose the port the app will run on internally
 EXPOSE 8000
 
