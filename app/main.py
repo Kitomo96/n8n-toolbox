@@ -256,34 +256,39 @@ async def run_crawl(
         if _Crawler is None:
             raise RuntimeError("crawl4ai.AsyncWebCrawler is not available in this package version")
 
-        # Per 0.7.x docs: pass a DefaultMarkdownGenerator via CrawlerRunConfig
         run_cfg = CrawlerRunConfig(
             cache_mode=CacheMode.BYPASS,
             markdown_generator=DefaultMarkdownGenerator()
         )
 
-        # Use context manager (recommended)
         async with _Crawler() as crawler:
-            result = await crawler.arun(url=url, config=run_cfg)
+            res = await crawler.arun(url=url, config=run_cfg)
 
-        # 0.7.x: result.markdown is a MarkdownGenerationResult (or str)
+        # --- 0.7.x-compliant extraction (no fallbacks) ---
         md_out = ""
-        md_obj = getattr(result, "markdown", None)
+        md_obj = getattr(res, "markdown", None)
 
+        # If markdown came as a plain string, use it
         if isinstance(md_obj, str) and md_obj.strip():
             md_out = md_obj
-        elif md_obj is not None:
-            # Prefer fit_markdown if present, else raw_markdown, else citations, else references
-            for key in ("fit_markdown", "raw_markdown", "markdown_with_citations", "references_markdown"):
-                val = getattr(md_obj, key, None)
-                if isinstance(val, str) and val.strip():
-                    md_out = val
-                    break
+        else:
+            # In 0.7.x, markdown is an object (StringCompatibleMarkdown / model)
+            if md_obj is not None:
+                for key in ("fit_markdown", "raw_markdown", "markdown_with_citations", "references_markdown"):
+                    val = getattr(md_obj, key, None)
+                    if isinstance(val, str) and val.strip():
+                        md_out = val
+                        break
 
-        # If no markdown fields populated at all, return empty string (no custom fallbacks)
-        final_markdown = md_out or ""
+        logging.info(
+            f"/crawl extracted: type={type(md_obj).__name__} "
+            f"raw={len(getattr(md_obj,'raw_markdown','') or '')} "
+            f"fit={len(getattr(md_obj,'fit_markdown','') or '')} "
+            f"cit={len(getattr(md_obj,'markdown_with_citations','') or '')} "
+            f"refs={len(getattr(md_obj,'references_markdown','') or '')}"
+        )
 
-        return {"ok": True, "data": {"markdown_content": final_markdown, "source_url": url}}
+        return {"ok": True, "data": {"markdown_content": md_out or "", "source_url": url}}
 
     except Exception as e:
         logging.error(f"An error occurred during crawling for {url}: {str(e)}", exc_info=True)
