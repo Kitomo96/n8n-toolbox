@@ -293,3 +293,49 @@ async def run_crawl(
     except Exception as e:
         logging.error(f"An error occurred during crawling for {url}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail={"ok": False, "error": {"message": f"An error occurred during crawling: {str(e)}"}})
+
+@app.post("/crawl_probe", tags=["Crawl4AI"])
+async def crawl_probe(
+    api_key: str = Depends(verify_api_key),
+    url: str = Form(...)
+):
+    # Import inside the handler so this block is drop-in
+    from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
+    from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
+
+    # Config per 0.7.x docs so `result.markdown.*` is populated
+    run_cfg = CrawlerRunConfig(
+        cache_mode=CacheMode.BYPASS,
+        markdown_generator=DefaultMarkdownGenerator()
+    )
+
+    async with AsyncWebCrawler() as crawler:
+        res = await crawler.arun(url=url, config=run_cfg)
+
+    md = getattr(res, "markdown", None)
+
+    used: str = "none"
+    value: str = ""
+
+    if isinstance(md, str) and md.strip():
+        used = "markdown(str)"
+        value = md
+    elif md is not None:
+        for key in ("fit_markdown", "raw_markdown", "markdown_with_citations", "references_markdown"):
+            val = getattr(md, key, None)
+            if isinstance(val, str) and val.strip():
+                used = key
+                value = val
+                break
+
+    return {
+        "ok": True,
+        "data": {
+            "source_url": url,
+            "used": used,
+            "length": len(value),
+            "preview": value[:160],
+            "has_cleaned_html": bool(getattr(res, "cleaned_html", "")),
+            "markdown_content": value,
+        },
+    }
